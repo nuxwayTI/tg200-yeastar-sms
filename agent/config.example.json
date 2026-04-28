@@ -1,1 +1,11 @@
-
+{
+  "server_url": "https://TU-SERVICIO.onrender.com",
+  "api_key": "CAMBIA-ESTO",
+  "agent_id": "cliente-001",
+  "tg_host": "192.168.20.31",
+  "tg_port": 5038,
+  "tg_user": "apiuser",
+  "tg_pass": "apipass",
+  "gsm_port": 2,
+  "poll_seconds": 5
+}
