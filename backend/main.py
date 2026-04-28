@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -12,10 +11,14 @@ app = FastAPI(title="TG200 Yeastar SMS Provider")
 
 API_KEY = os.getenv("API_KEY", "change-me")
 YEASTAR_WEBHOOK_URL = os.getenv("YEASTAR_WEBHOOK_URL", "")
+SERVICE_NUMBER = os.getenv("SERVICE_NUMBER", "")
 
 sms_queue = []
 results = {}
 connected_agents = {}
+
+last_inbound = {}
+last_webhook_response = {}
 
 
 class SmsRequest(BaseModel):
@@ -99,6 +102,8 @@ async def agent_result(request: Request, agent_key: str):
 
 @app.post("/agent/inbound")
 async def agent_inbound(request: Request, agent_key: str):
+    global last_inbound, last_webhook_response
+
     if agent_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid agent key")
 
@@ -107,23 +112,33 @@ async def agent_inbound(request: Request, agent_key: str):
     if not YEASTAR_WEBHOOK_URL:
         return {"ok": False, "detail": "YEASTAR_WEBHOOK_URL not configured"}
 
+    if not SERVICE_NUMBER:
+        return {"ok": False, "detail": "SERVICE_NUMBER not configured"}
+
+    sender = inbound.get("sender", "")
+    content = inbound.get("content", "")
+    received_at = inbound.get("received_at") or time.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+    if sender and not sender.startswith("+"):
+        sender = "+591" + sender
+
     payload = {
         "data": {
             "event_type": "message.received",
             "id": str(uuid.uuid4()),
-            "occurred_at": inbound.get("received_at"),
+            "occurred_at": received_at,
             "payload": {
                 "id": inbound.get("id", str(uuid.uuid4())),
                 "from": {
-                    "phone_number": inbound.get("sender")
+                    "phone_number": sender
                 },
                 "to": [
                     {
-                        "phone_number": inbound.get("to", "")
+                        "phone_number": SERVICE_NUMBER
                     }
                 ],
-                "text": inbound.get("content", ""),
-                "received_at": inbound.get("received_at"),
+                "text": content,
+                "received_at": received_at,
                 "record_type": "message",
                 "direction": "inbound",
                 "type": "SMS"
@@ -132,12 +147,35 @@ async def agent_inbound(request: Request, agent_key: str):
         }
     }
 
-    response = requests.post(YEASTAR_WEBHOOK_URL, json=payload, timeout=20)
-
-    return {
-        "ok": response.status_code in [200, 204],
-        "status_code": response.status_code
+    last_inbound = {
+        "received_from_agent": inbound,
+        "sent_to_yeastar": payload
     }
+
+    try:
+        response = requests.post(YEASTAR_WEBHOOK_URL, json=payload, timeout=20)
+
+        last_webhook_response = {
+            "status_code": response.status_code,
+            "text": response.text
+        }
+
+        return {
+            "ok": response.status_code in [200, 204],
+            "status_code": response.status_code,
+            "response": response.text
+        }
+
+    except Exception as e:
+        last_webhook_response = {
+            "status_code": None,
+            "text": str(e)
+        }
+
+        return {
+            "ok": False,
+            "error": str(e)
+        }
 
 
 @app.get("/health")
@@ -146,5 +184,9 @@ def health():
         "status": "ok",
         "queued": len(sms_queue),
         "agents": connected_agents,
-        "results": results
+        "results": results,
+        "service_number": SERVICE_NUMBER,
+        "has_yeastar_webhook": bool(YEASTAR_WEBHOOK_URL),
+        "last_inbound": last_inbound,
+        "last_webhook_response": last_webhook_response
     }
