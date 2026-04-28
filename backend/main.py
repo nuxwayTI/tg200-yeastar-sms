@@ -117,10 +117,18 @@ async def agent_inbound(request: Request, agent_key: str):
 
     sender = inbound.get("sender", "")
     content = inbound.get("content", "")
-    received_at = inbound.get("received_at") or time.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    
+    # limpiar formato
+    content = content.replace("+", " ")
 
+    # fecha en formato ISO que Yeastar sí acepta
+    received_at = time.strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
+
+    # asegurar formato internacional
     if sender and not sender.startswith("+"):
         sender = "+591" + sender
+
+    message_id = inbound.get("id") or str(uuid.uuid4())
 
     payload = {
         "data": {
@@ -128,7 +136,7 @@ async def agent_inbound(request: Request, agent_key: str):
             "id": str(uuid.uuid4()),
             "occurred_at": received_at,
             "payload": {
-                "id": inbound.get("id", str(uuid.uuid4())),
+                "id": message_id,
                 "from": {
                     "phone_number": sender
                 },
